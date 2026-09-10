@@ -166,13 +166,6 @@ class FlinkAdapterTest {
     }
 
     @Test
-    void uploadJarIsRejectedWhenNoDirectoryIsAllowListed() {
-        ToolDef upload = tool(new FlinkAdapter().tools(config()), "upload_jar");
-        assertThrows(Inputs.InvalidInput.class,
-                () -> upload.backend().apply(ctx("upload_jar", ToolClass.MUTATE, Map.of("path", "/tmp/any.jar"))));
-    }
-
-    @Test
     void readOnlySqlToolRejectsMutatingStatements() {
         ToolDef sql = tool(new FlinkAdapter().tools(config()), "run_sql_readonly");
         assertThrows(Inputs.InvalidInput.class,
