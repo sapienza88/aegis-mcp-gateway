@@ -29,7 +29,7 @@ final class AdopterConfigurations {
 
   private static final Path ROOT = Path.of("..", "..", "adopters", "configurations").normalize();
   private static final List<String> PROFILE_NAMES =
-      List.of("a2a", "existing-mcp-server", "flink", "iceberg", "kafka", "spark", "spark-connect");
+      List.of("a2a", "existing-mcp-server", "flink", "iceberg", "kafka", "spark", "spark-connect","yarn");
 
   private AdopterConfigurations() {}
 

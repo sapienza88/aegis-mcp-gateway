@@ -16,6 +16,7 @@ configurations/
   spark-connect/         typed Spark Connect source profile
   iceberg/               reference Iceberg REST catalog profile
   kafka/                 Kafka Connect, Schema Registry and Kafka Admin profile
+  yarn/                  reference Apache Hadoop YARN ResourceManager profile
   template/              teaching template, not a deployment profile
   adapters/              25 project-specific adopter profiles
 ```
@@ -31,7 +32,7 @@ configurations/
 | [spark-connect](spark-connect/README.md) | [spark-connect.yaml](spark-connect/spark-connect.yaml) | Governing Spark Connect SQL/dataframe actions | typed `spark-connect` | current local Spark Connect server run |
 | [iceberg](iceberg/README.md) | [iceberg.yaml](iceberg/iceberg.yaml) | Governing an Iceberg REST Catalog | `http` | target catalog endpoint required |
 | [kafka](kafka/README.md) | [kafka.yaml](kafka/kafka.yaml) | Governing Kafka Connect, Schema Registry and Kafka Admin | `http` + typed `kafka-admin` | broker and Connect endpoints required |
-| [template](template/README.md) | [TEMPLATE.yaml](template/TEMPLATE.yaml) | Starting a new project profile | `http` example | replace every placeholder before use |
+| [yarn](yarn/README.md) | [yarn.yaml](yarn/yarn.yaml) | Governing Apache Hadoop YARN ResourceManager cluster and application operations | `http` | current local `MiniYARNCluster` front-door run (`HadoopYarnFrontDoorsTest`) || [template](template/README.md) | [TEMPLATE.yaml](template/TEMPLATE.yaml) | Starting a new project profile | `http` example | replace every placeholder before use |
 | [adapters](adapters/README.md) | catalog of 25 named YAML profiles | Selecting a project-specific reference profile | HTTP, JDBC or typed source | evidence differs per adopter |
 
 If you use Cursor or Kiro, the profile YAML is not what the editor loads. Open that profile's README,

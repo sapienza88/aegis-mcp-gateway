@@ -106,7 +106,7 @@ class DocumentationClaimsTest {
     String catalog = document("adopters/configurations/README.md");
     List<Path> profiles = AdopterConfigurations.profiles();
     assertEquals(
-        7, profiles.size(), "shared-profile layout must retain the seven documented references");
+        8, profiles.size(), "shared-profile layout must retain the eight documented references");
     for (Path profile : profiles) {
       String name = profile.getParent().getFileName().toString();
       Path readme = profile.getParent().resolve("README.md");
