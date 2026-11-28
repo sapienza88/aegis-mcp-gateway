@@ -1,0 +1,260 @@
+# Copyright 2026 Viquar Khan and the Aegis MCP Gateway contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Apache Hadoop YARN: governed MCP tools over the ResourceManager REST API (default port 8088).
+# Endpoints are the documented YARN RM REST API: /ws/v1/cluster/info, /ws/v1/cluster/metrics,
+# /ws/v1/cluster/scheduler, /ws/v1/cluster/nodes, /ws/v1/cluster/nodes/:nodeId,
+# /ws/v1/cluster/apps, /ws/v1/cluster/apps/:appId, /ws/v1/cluster/apps/:appId/state,
+# /ws/v1/cluster/apps/:appId/queue, /ws/v1/cluster/apps/:appId/attempts,
+# /ws/v1/cluster/reservations/list, /ws/v1/cluster/delegation-token.
+
+gateway:
+  name: aegis-yarn
+
+access:
+  writeGroups: [yarn-operators]
+  approverGroups: [yarn-approvers]
+
+approval:
+  keyEnv: AEGIS_SIGNING_KEY          # >= 32 bytes; shared by every replica
+
+policy:
+  rules:
+    - {id: read-yarn, groups: [yarn-users, yarn-operators], classes: [READ]}
+    - {id: operate-apps, groups: [yarn-operators], classes: [MUTATE, DESTRUCTIVE], resources: ["yarn:app:*"]}
+    # Prevent killing system/long-running service apps unless explicitly targeted by a narrower rule,
+    # or restrict queue moves to specific queues if scopes are enabled.
+    - {id: kill-apps, groups: [yarn-operators], classes: [DESTRUCTIVE], tools: [yarn_kill_app],
+       resources: ["yarn:app:application_*"]}
+
+
+rateLimits:
+  perCallerPerMinute: 120
+  budgetPerHour: 2000
+
+egress:
+  allowCidrs: [10.0.0.0/8]           # cluster network; the baseUrl host is allowed automatically
+
+audit:
+  file: audit/aegis-yarn.jsonl
+
+sources:
+  - id: yarn
+    type: http
+    baseUrl: http://yarn-resourcemanager:8088
+    tools:
+      # ---------------------------------------------------------------- cluster reads
+      - name: yarn_get_cluster_info
+        description: "Cluster overview: YARN version, ResourceManager state (ACTIVE/STANDBY), HA state, and start time."
+        class: READ
+        inputSchema: {type: object, properties: {}, additionalProperties: false}
+        request: {method: GET, path: /ws/v1/cluster/info}
+        response: {pointer: /clusterInfo}
+
+      - name: yarn_get_cluster_metrics
+        description: "Cluster resource metrics: allocated/available/total MB and vCores, active/unhealthy nodes, and app counts."
+        class: READ
+        inputSchema: {type: object, properties: {}, additionalProperties: false}
+        request: {method: GET, path: /ws/v1/cluster/metrics}
+        response: {pointer: /clusterMetrics}
+
+      - name: yarn_get_scheduler
+        description: "Scheduler hierarchy, queue capacities, max capacities, and active queue usage."
+        class: READ
+        inputSchema: {type: object, properties: {}, additionalProperties: false}
+        request: {method: GET, path: /ws/v1/cluster/scheduler}
+        response: {pointer: /scheduler}
+
+      - name: yarn_list_nodes
+        description: "List NodeManagers registered with the ResourceManager, including health, rack, and slot usage."
+        class: READ
+        inputSchema:
+          type: object
+          properties:
+            states:
+              type: string
+              description: "Optional comma-separated node states filter (e.g. RUNNING,UNHEALTHY,DECOMMISSIONED)."
+              maxLength: 128
+          additionalProperties: false
+        request: {method: GET, path: /ws/v1/cluster/nodes, query: {states: "{states}"}}
+        response: {pointer: /nodes}
+
+      - name: yarn_get_node
+        description: "Details of a single NodeManager by nodeId (host:port)."
+        class: READ
+        inputSchema:
+          type: object
+          properties:
+            nodeId: {type: string, minLength: 3, maxLength: 256}
+          required: [nodeId]
+          additionalProperties: false
+        request: {method: GET, path: "/ws/v1/cluster/nodes/{nodeId}"}
+        response: {pointer: /node}
+        resources: [{type: "yarn:node", pointer: /nodeId}]
+
+      - name: yarn_list_reservations
+        description: "List active resource reservations in the YARN ReservationSystem."
+        class: READ
+        inputSchema: {type: object, properties: {}, additionalProperties: false}
+        request: {method: GET, path: /ws/v1/cluster/reservations/list}
+
+      # ---------------------------------------------------------------- application reads
+      - name: yarn_list_apps
+        description: "List YARN applications, optionally filtered by state, queue, user, or applicationTypes."
+        class: READ
+        inputSchema:
+          type: object
+          properties:
+            states:
+              type: string
+              description: "Comma-separated states: NEW,ACCEPTED,RUNNING,FINISHED,FAILED,KILLED."
+              maxLength: 128
+            queue:
+              type: string
+              maxLength: 256
+            user:
+              type: string
+              maxLength: 128
+            applicationTypes:
+              type: string
+              description: "Comma-separated types (e.g. MAPREDUCE,SPARK,FLINK,TEZ)."
+              maxLength: 128
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 1000
+          additionalProperties: false
+        request:
+          method: GET
+          path: /ws/v1/cluster/apps
+          query:
+            states: "{states}"
+            queue: "{queue}"
+            user: "{user}"
+            applicationTypes: "{applicationTypes}"
+            limit: "{limit}"
+        response: {pointer: /apps}
+
+      - name: yarn_get_app
+        description: "Full details of a single YARN application: state, finalStatus, progress, queue, diagnostics, and AM URL."
+        class: READ
+        inputSchema:
+          type: object
+          properties:
+            appId: {type: string, pattern: "^application_[0-9]+_[0-9]+$", maxLength: 64}
+          required: [appId]
+          additionalProperties: false
+        request: {method: GET, path: "/ws/v1/cluster/apps/{appId}"}
+        response: {pointer: /app}
+        resources: [{type: "yarn:app", pointer: /appId}]
+
+      - name: yarn_get_app_state
+        description: "Current lifecycle state of a YARN application without full container/diagnostics metadata."
+        class: READ
+        inputSchema:
+          type: object
+          properties:
+            appId: {type: string, pattern: "^application_[0-9]+_[0-9]+$", maxLength: 64}
+          required: [appId]
+          additionalProperties: false
+        request: {method: GET, path: "/ws/v1/cluster/apps/{appId}/state"}
+        response: {pointer: /state}
+        resources: [{type: "yarn:app", pointer: /appId}]
+
+      - name: yarn_get_app_queue
+        description: "Current scheduler queue assigned to a YARN application."
+        class: READ
+        inputSchema:
+          type: object
+          properties:
+            appId: {type: string, pattern: "^application_[0-9]+_[0-9]+$", maxLength: 64}
+          required: [appId]
+          additionalProperties: false
+        request: {method: GET, path: "/ws/v1/cluster/apps/{appId}/queue"}
+        response: {pointer: /queue}
+        resources: [{type: "yarn:app", pointer: /appId}]
+
+      - name: yarn_list_app_attempts
+        description: "ApplicationMaster attempt history, container IDs, and node logs URLs for one application."
+        class: READ
+        inputSchema:
+          type: object
+          properties:
+            appId: {type: string, pattern: "^application_[0-9]+_[0-9]+$", maxLength: 64}
+          required: [appId]
+          additionalProperties: false
+        request: {method: GET, path: "/ws/v1/cluster/apps/{appId}/attempts"}
+        response: {pointer: /appAttempts}
+        resources: [{type: "yarn:app", pointer: /appId}]
+
+      # ---------------------------------------------------------------- writes
+      - name: yarn_move_app_queue
+        description: "Move a running or accepted YARN application to a different scheduler queue."
+        class: MUTATE
+        inputSchema:
+          type: object
+          properties:
+            appId: {type: string, pattern: "^application_[0-9]+_[0-9]+$", maxLength: 64}
+            queue: {type: string, minLength: 1, maxLength: 256}
+          required: [appId, queue]
+          additionalProperties: false
+        request:
+          method: PUT
+          path: "/ws/v1/cluster/apps/{appId}/queue"
+          body: {"queue": "{queue}"}
+        resources: [{type: "yarn:app", pointer: /appId}]
+
+      - name: yarn_update_app_priority
+        description: "Change the scheduling priority integer of a running or accepted YARN application."
+        class: MUTATE
+        inputSchema:
+          type: object
+          properties:
+            appId: {type: string, pattern: "^application_[0-9]+_[0-9]+$", maxLength: 64}
+            priority: {type: integer, minimum: 0, maximum: 100}
+          required: [appId, priority]
+          additionalProperties: false
+        request:
+          method: PUT
+          path: "/ws/v1/cluster/apps/{appId}/priority"
+          body: {"priority": "{priority}"}
+        resources: [{type: "yarn:app", pointer: /appId}]
+
+      - name: yarn_kill_app
+        description: "Terminate a YARN application immediately by transitioning its state to KILLED. Irreversible."
+        class: DESTRUCTIVE
+        inputSchema:
+          type: object
+          properties:
+            appId: {type: string, pattern: "^application_[0-9]+_[0-9]+$", maxLength: 64}
+          required: [appId]
+          additionalProperties: false
+        request:
+          method: PUT
+          path: "/ws/v1/cluster/apps/{appId}/state"
+          body: {"state": "KILLED"}
+        resources: [{type: "yarn:app", pointer: /appId}]
+        # TOOL dry-run validates the app exists and fetches its current state/user/queue before issuing
+        # the approval challenge.
+        dryRun: {mode: TOOL, previewTool: yarn_get_app}
+
+      - name: yarn_refresh_queues
+        description: "Reload YARN scheduler queue configuration (equivalent to yarn rmadmin -refreshQueues)."
+        class: DESTRUCTIVE
+        inputSchema: {type: object, properties: {}, additionalProperties: false}
+        request:
+          method: POST
+          path: /ws/v1/cluster/scheduler-conf/mutation
+        # GATEWAY dry-run issues a signed receipt without touching the live scheduler configuration.
+        dryRun: {mode: GATEWAY}
